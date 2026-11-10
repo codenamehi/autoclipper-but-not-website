@@ -11,6 +11,12 @@ name: Clip uploaded video
 on:
   release:
     types: [published]
+  # "Run workflow" button: clip an existing release again (e.g. with the newest code)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to clip again (e.g. video1)"
+        required: true
 
 permissions:
   contents: write
@@ -21,8 +27,7 @@ jobs:
     timeout-minutes: 240
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.event.release.tag_name }}
-      SETTINGS: ${{ github.event.release.body }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +47,15 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: whisper-small
+
+      - name: Read the settings in the release description
+        run: |
+          eof="END_$(openssl rand -hex 8)"
+          {
+            echo "SETTINGS<<$eof"
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.body // ""'
+            echo "$eof"
+          } >> "$GITHUB_ENV"
 
       - name: Download the video(s) you attached
         run: |

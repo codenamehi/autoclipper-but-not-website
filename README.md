@@ -117,6 +117,8 @@ Two GitHub Actions are included. GitHub's computers do all the work for free.
    ```
 5. Click **Publish release**. After 10–40 minutes, refresh the release page. Your clips appear under **Assets**.
 
+To clip a release again (for example after changing its description, or after updating the code): **Actions → Clip uploaded video → Run workflow**, type the release's tag (e.g. `video1`) and click **Run workflow**. The new clips replace the old ones on that release.
+
 ### Option 2: paste a link
 
 **Actions → Make clips → Run workflow**, paste the link, pick the caption style from the menus and click **Run workflow**. Download **clips** from the finished run.
