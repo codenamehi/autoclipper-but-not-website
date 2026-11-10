@@ -1,9 +1,0 @@
-clips/
-data/
-__pycache__/
-*.pyc
-.venv/
-venv/
-.env
-.neon
-node_modules/
