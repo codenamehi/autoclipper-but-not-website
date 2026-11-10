@@ -54,6 +54,11 @@ jobs:
           ls -la input
 
       - name: Make clips
+        env:
+          # AI picks the moments when one of these is set under
+          # Settings > Secrets and variables > Actions (otherwise the free built-in picker is used)
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           for f in input/*; do
             python clipper.py "$f" --font "Liberation Sans" --settings="$SETTINGS"

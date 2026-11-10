@@ -424,17 +424,28 @@ def select_non_overlapping(cands: list[Clip], n: int, buffer: float = 3.0,
 # --------------------------------------------------------------------------- #
 # 3b. LLM picker (optional, smarter)
 # --------------------------------------------------------------------------- #
-LLM_PROMPT = """You are a viral short-form video editor (TikTok, YouTube Shorts, Reels).
-Below is a timestamped transcript of a long video. Choose the {n} BEST moments to turn into
-standalone vertical clips.
+LLM_PROMPT = """You are the editor behind a short-form channel with millions of views (TikTok,
+YouTube Shorts, Reels). Below is a timestamped transcript of a long video. Lines marked (LOUD)
+were said with raised voices or got a loud reaction. Choose the {n} moments most likely to make
+a stranger stop scrolling and watch to the end.
+
+What makes a great clip:
+- The first sentence alone grabs attention: a bold claim, a provocative question, a challenge,
+  or the start of a clash. Never start on small talk, greetings or filler.
+- Something happens: tension builds and pays off with a comeback, a "gotcha", a confession,
+  a surprising answer, an argument being won, or a big laugh.
+- In debates and conversations, the best moments are sharp exchanges where one side gets
+  caught out, changes their mind, or can't answer, and the crowd reacts.
+- It ends right after the payoff, on a complete thought, so viewers want to rewatch or comment.
+- Skip slow explanations, repeated points, long monologues with no turn, and moments that need
+  earlier context to make sense.
 
 Rules:
 - Each clip must be between {min_len:.0f} and {max_len:.0f} seconds long.
 - Clips must not overlap.
-- Each must make sense on its own with no prior context, open with a strong hook in the
-  first 3 seconds, and end on a complete thought (a punchline, insight, or payoff).
-- Prefer: surprising claims, strong opinions, emotional stories, useful tips, funny moments.
 - Use the timestamps exactly as given (seconds).
+- Rank them: best clip first.
+- title: a short, curiosity-driven hook (max 8 words), not a summary.
 
 Reply with ONLY JSON, no other text:
 {{"clips": [{{"start": 123.4, "end": 165.2, "title": "short catchy title", "reason": "why it works"}}]}}
@@ -472,8 +483,14 @@ def ask_llm(prompt: str) -> str:
     raise RuntimeError("No ANTHROPIC_API_KEY or OPENAI_API_KEY set")
 
 
-def pick_llm(sentences: list[Sentence], n: int, min_len: float, max_len: float) -> list[Clip]:
-    transcript = "\n".join(f"[{s.start:.1f}-{s.end:.1f}] {s.text}" for s in sentences)
+def pick_llm(sentences: list[Sentence], n: int, min_len: float, max_len: float,
+             energy: np.ndarray | None = None) -> list[Clip]:
+    def loud(s: Sentence) -> str:
+        if energy is None or not len(energy):
+            return ""
+        seg = energy[int(s.start / 0.5):max(int(s.start / 0.5) + 1, int(s.end / 0.5))]
+        return " (LOUD)" if len(seg) and float(seg.max()) > 1.6 else ""
+    transcript = "\n".join(f"[{s.start:.1f}-{s.end:.1f}]{loud(s)} {s.text}" for s in sentences)
     transcript = transcript[:400_000]
     raw = ask_llm(LLM_PROMPT.format(n=n, min_len=min_len, max_len=max_len, transcript=transcript))
     m = re.search(r"\{.*\}", raw, re.S)
@@ -1018,7 +1035,8 @@ def run_pipeline(source: str, out_root: Path, *, clips: int = 4, min_len: float 
             picker == "auto" and (os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")))
         if use_llm:
             try:
-                picked = pick_llm(sentences, clips, min_len, max_len)
+                picked = pick_llm(sentences, clips, min_len, max_len, energy)
+                log(f"AI picked {len(picked)} moments.")
             except Exception as e:  # never fail the whole run because of the LLM
                 log(f"LLM picker failed ({e}); falling back to local scoring.")
         if len(picked) < clips:
