@@ -455,10 +455,10 @@ Transcript:
 {transcript}"""
 
 
-def _http_json(url: str, headers: dict, payload: dict) -> dict:
+def _http_json(url: str, headers: dict, payload: dict, timeout: float = 300) -> dict:
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
                                  headers={"content-type": "application/json", **headers})
-    with urllib.request.urlopen(req, timeout=300) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
 
 
@@ -466,28 +466,46 @@ GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"
 
 
 def ask_gemini(prompt: str) -> str:
-    """Google Gemini (free tier with a Google AI Studio key)."""
+    """Google Gemini (free tier with a Google AI Studio key).
+
+    Free models are often busy (503), rate-limited (429) or slow, so each model gets
+    a second try after a short wait, then the next free model is tried."""
+    import time
     key = os.environ["GEMINI_API_KEY"]
     models = [os.environ["GEMINI_MODEL"]] if os.getenv("GEMINI_MODEL") else GEMINI_MODELS
     last: Exception | None = None
     for model in models:
-        log(f"Asking Gemini ({model}) to pick the best moments...")
-        try:
-            data = _http_json(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                {"x-goog-api-key": key},
-                {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                 "generationConfig": {"responseMimeType": "application/json",
-                                      "temperature": 0.4}})
-            parts = data["candidates"][0]["content"]["parts"]
-            return "".join(p.get("text", "") for p in parts)
-        except urllib.error.HTTPError as e:  # e.g. model retired, or free limit hit: try the next
-            body = e.read().decode("utf-8", "replace")[:300]
-            log(f"  Gemini {model} said {e.code}: {body}")
-            last = e
-        except (KeyError, IndexError) as e:
-            log(f"  Gemini {model} gave an empty answer")
-            last = e
+        for attempt in (1, 2):
+            log(f"Asking Gemini ({model}) to pick the best moments..."
+                + (" (second try)" if attempt == 2 else ""))
+            try:
+                data = _http_json(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    {"x-goog-api-key": key},
+                    {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                     "generationConfig": {"responseMimeType": "application/json",
+                                          "temperature": 0.4}},
+                    timeout=420)
+                parts = data["candidates"][0]["content"]["parts"]
+                text = "".join(p.get("text", "") for p in parts)
+                if text.strip():
+                    return text
+                log(f"  Gemini {model} gave an empty answer")
+                last = RuntimeError("empty answer")
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", "replace")
+                log(f"  Gemini {model} said {e.code}: {' '.join(body.split())[:200]}")
+                last = e
+                if e.code in (400, 401, 403):  # bad key or request: other models won't help
+                    raise RuntimeError(f"Gemini refused the request ({e.code}). Check GEMINI_API_KEY.")
+                if e.code == 404:              # model retired: go straight to the next one
+                    break
+            except (TimeoutError, OSError, KeyError, IndexError, ValueError) as e:
+                log(f"  Gemini {model} didn't answer in time ({e})" if isinstance(e, (TimeoutError, OSError))
+                    else f"  Gemini {model} gave an unreadable answer")
+                last = e
+            if attempt == 1:
+                time.sleep(20)
     raise RuntimeError(f"Gemini didn't answer ({last})")
 
 
