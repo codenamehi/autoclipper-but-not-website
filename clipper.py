@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.error
 import urllib.request
 import wave
 from dataclasses import dataclass, asdict, field
@@ -461,7 +462,38 @@ def _http_json(url: str, headers: dict, payload: dict) -> dict:
         return json.loads(r.read())
 
 
+GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]  # free tier
+
+
+def ask_gemini(prompt: str) -> str:
+    """Google Gemini (free tier with a Google AI Studio key)."""
+    key = os.environ["GEMINI_API_KEY"]
+    models = [os.environ["GEMINI_MODEL"]] if os.getenv("GEMINI_MODEL") else GEMINI_MODELS
+    last: Exception | None = None
+    for model in models:
+        log(f"Asking Gemini ({model}) to pick the best moments...")
+        try:
+            data = _http_json(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                {"x-goog-api-key": key},
+                {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                 "generationConfig": {"responseMimeType": "application/json",
+                                      "temperature": 0.4}})
+            parts = data["candidates"][0]["content"]["parts"]
+            return "".join(p.get("text", "") for p in parts)
+        except urllib.error.HTTPError as e:  # e.g. model retired, or free limit hit: try the next
+            body = e.read().decode("utf-8", "replace")[:300]
+            log(f"  Gemini {model} said {e.code}: {body}")
+            last = e
+        except (KeyError, IndexError) as e:
+            log(f"  Gemini {model} gave an empty answer")
+            last = e
+    raise RuntimeError(f"Gemini didn't answer ({last})")
+
+
 def ask_llm(prompt: str) -> str:
+    if os.getenv("GEMINI_API_KEY"):
+        return ask_gemini(prompt)
     if os.getenv("ANTHROPIC_API_KEY"):
         model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
         log(f"Asking Claude ({model}) to pick the best moments...")
@@ -480,7 +512,7 @@ def ask_llm(prompt: str) -> str:
                           {"model": model,
                            "messages": [{"role": "user", "content": prompt}]})
         return data["choices"][0]["message"]["content"]
-    raise RuntimeError("No ANTHROPIC_API_KEY or OPENAI_API_KEY set")
+    raise RuntimeError("No GEMINI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY set")
 
 
 def pick_llm(sentences: list[Sentence], n: int, min_len: float, max_len: float,
@@ -1032,7 +1064,8 @@ def run_pipeline(source: str, out_root: Path, *, clips: int = 4, min_len: float 
         report("pick", 0.0, "Finding the best moments")
         picked = []
         use_llm = picker == "llm" or (
-            picker == "auto" and (os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")))
+            picker == "auto" and (os.getenv("GEMINI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+                              or os.getenv("OPENAI_API_KEY")))
         if use_llm:
             try:
                 picked = pick_llm(sentences, clips, min_len, max_len, energy)

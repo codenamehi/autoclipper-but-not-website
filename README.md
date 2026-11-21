@@ -143,7 +143,16 @@ YouTube usually blocks GitHub's servers, so use Option 1 for YouTube videos.
 
 Colour names: white, black, yellow, lime, green, red, pink, orange, blue, cyan, purple, gray.
 
-To use LLM picking on GitHub, add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` under **Settings → Secrets and variables → Actions**.
+### Let AI pick the moments (free with Gemini)
+
+The built-in picker uses simple rules. An AI that reads the whole transcript picks far better moments: comebacks, punchlines and crowd reactions.
+
+1. Get a free key at **[Google AI Studio](https://aistudio.google.com/apikey)**: sign in with Google and click **Create API key**. No card needed.
+2. In your repo: **Settings → Secrets and variables → Actions → New repository secret**. Name: `GEMINI_API_KEY`, Secret: your key.
+
+That's it. The run log will say **"Asking Gemini … to pick the best moments"**. Google's free tier has daily limits and may use what you send to improve its products. One request per video is used.
+
+You can use `ANTHROPIC_API_KEY` (Claude) or `OPENAI_API_KEY` instead (paid, a few cents per video).
 
 ## Speed
 
